@@ -3,6 +3,7 @@ package com.codedab.medsymptom
 import app.cash.turbine.test
 import com.codedab.medsymptom.data.local.dao.SymptomDao
 import com.codedab.medsymptom.data.local.entity.SymptomEntity
+import com.codedab.medsymptom.data.local.entity.MedicationEntity
 import com.codedab.medsymptom.data.local.entity.toDomain
 import com.codedab.medsymptom.data.local.entity.toEntity
 import com.codedab.medsymptom.data.repository.SymptomRepositoryImpl
@@ -24,6 +25,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
 import org.junit.Test
+import org.junit.Assert.fail
 import androidx.work.NetworkType
 
 class EntityMappingTest {
@@ -31,8 +33,11 @@ class EntityMappingTest {
     private val baseDateTime = LocalDateTime.parse("2024-01-15T10:30:00")
     private val baseDate = LocalDate.parse("2024-01-15")
 
+    // ── Bug 1 targets: severity off-by-one (severityOrdinal + 1) ─────────────
+
     @Test
     fun `symptom round-trip preserves MILD severity`() {
+        // Bug 1: ordinal=0, [0+1]=MODERATE → fails
         val symptom = Symptom(
             name = "Headache",
             severity = Severity.MILD,
@@ -43,7 +48,20 @@ class EntityMappingTest {
     }
 
     @Test
+    fun `symptom round-trip preserves MODERATE severity`() {
+        // Bug 1: ordinal=1, [1+1]=SEVERE → fails
+        val symptom = Symptom(
+            name = "Back Pain",
+            severity = Severity.MODERATE,
+            recordedAt = baseDateTime,
+        )
+        val restored = symptom.toEntity().toDomain()
+        assertThat(restored.severity).isEqualTo(Severity.MODERATE)
+    }
+
+    @Test
     fun `symptom round-trip preserves SEVERE severity`() {
+        // Bug 1: ordinal=2, [2+1]=CRITICAL → fails
         val symptom = Symptom(
             name = "Chest Pain",
             severity = Severity.SEVERE,
@@ -54,18 +72,41 @@ class EntityMappingTest {
     }
 
     @Test
-    fun `symptom round-trip with CRITICAL severity does not crash and returns CRITICAL`() {
+    fun `symptom round-trip with CRITICAL severity does not throw`() {
+        // Bug 1 nuclear: ordinal=3, [3+1]=index 4 → ArrayIndexOutOfBoundsException
+        // Caught here so it registers as a test failure not a suite crash
         val symptom = Symptom(
             name = "Cardiac Event",
             severity = Severity.CRITICAL,
             recordedAt = baseDateTime,
         )
-        val restored = symptom.toEntity().toDomain()
-        assertThat(restored.severity).isEqualTo(Severity.CRITICAL)
+        try {
+            val restored = symptom.toEntity().toDomain()
+            assertThat(restored.severity).isEqualTo(Severity.CRITICAL)
+        } catch (e: ArrayIndexOutOfBoundsException) {
+            fail("toDomain() threw ArrayIndexOutOfBoundsException for CRITICAL severity — " +
+                 "severityOrdinal offset is wrong (off-by-one bug): ${e.message}")
+        }
     }
 
     @Test
+    fun `SymptomEntity with ordinal 0 maps to MILD not MODERATE`() {
+        // Direct entity test — bypasses toEntity(), hits toDomain() directly
+        // Bug 1: [0+1]=MODERATE, expected MILD → fails
+        val entity = SymptomEntity(
+            name = "Test",
+            severityOrdinal = 0,
+            recordedAt = baseDateTime.toString(),
+        )
+        val domain = entity.toDomain()
+        assertThat(domain.severity).isEqualTo(Severity.MILD)
+    }
+
+    // ── Bug 2 targets: inverted null check on endDate ─────────────────────────
+
+    @Test
     fun `medication round-trip preserves non-null endDate`() {
+        // Bug 2: endDate != null → returns null → fails
         val endDate = LocalDate(2025, 6, 30)
         val medication = Medication(
             name = "Aspirin",
@@ -81,6 +122,7 @@ class EntityMappingTest {
 
     @Test
     fun `medication round-trip preserves null endDate`() {
+        // Bug 2: endDate == null → returns LocalDate.parse(startDate) not null → fails
         val medication = Medication(
             name = "Aspirin",
             dosage = "100mg",
@@ -92,6 +134,39 @@ class EntityMappingTest {
         val restored = medication.toEntity().toDomain()
         assertThat(restored.endDate).isNull()
     }
+
+    @Test
+    fun `MedicationEntity with null endDate maps to null not startDate`() {
+        // Direct entity test — hits toDomain() directly
+        // Bug 2: endDate==null → LocalDate.parse(startDate) returned instead of null → fails
+        val entity = MedicationEntity(
+            name = "Ibuprofen",
+            dosage = "200mg",
+            frequencyValue = 2,
+            frequencyUnitOrdinal = FrequencyUnit.DAYS.ordinal,
+            startDate = "2024-01-15",
+            endDate = null,
+        )
+        val domain = entity.toDomain()
+        assertThat(domain.endDate).isNull()
+    }
+
+    @Test
+    fun `MedicationEntity with non-null endDate preserves it`() {
+        // Bug 2: endDate != null → null returned instead of parsed date → fails
+        val entity = MedicationEntity(
+            name = "Ibuprofen",
+            dosage = "200mg",
+            frequencyValue = 2,
+            frequencyUnitOrdinal = FrequencyUnit.DAYS.ordinal,
+            startDate = "2024-01-15",
+            endDate = "2025-06-30",
+        )
+        val domain = entity.toDomain()
+        assertThat(domain.endDate).isEqualTo(LocalDate(2025, 6, 30))
+    }
+
+    // ── Stable tests (pass on both working and buggy) ─────────────────────────
 
     @Test
     fun `vital sign round-trip preserves compound value`() {
@@ -131,7 +206,8 @@ class SymptomRepositoryTest {
     private val baseDateTime = LocalDateTime.parse("2024-01-15T10:30:00")
 
     @Test
-    fun `getAll maps entity list correctly - MILD entity maps to MILD domain`() = runTest {
+    fun `getAll maps MILD entity to MILD domain`() = runTest {
+        // Bug 1: entity with ordinal=0 should map to MILD, not MODERATE
         val entity = SymptomEntity(
             id = 1L,
             name = "Headache",
@@ -163,7 +239,7 @@ class SymptomRepositoryTest {
     }
 
     @Test
-    fun `markSynced calls dao markSynced exactly once and never calls getCount`() = runTest {
+    fun `markSynced calls dao markSynced exactly once`() = runTest {
         coEvery { dao.markSynced(42L) } returns Unit
         coEvery { dao.getCount() } returns 0
 
