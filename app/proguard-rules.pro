@@ -1,0 +1,11 @@
+-keep class com.codedab.medsymptom.domain.model.** { *; }
+-keep class com.codedab.medsymptom.data.local.entity.** { *; }
+-keep class net.sqlcipher.** { *; }
+-keep class net.sqlcipher.database.** { *; }
+-keep class dagger.hilt.** { *; }
+-keep class javax.inject.** { *; }
+-keep @dagger.hilt.android.HiltAndroidApp class * { *; }
+-keep @dagger.hilt.InstallIn class * { *; }
+-keep class androidx.room.** { *; }
+-keep class androidx.work.** { *; }
+-keepattributes *Annotation*
