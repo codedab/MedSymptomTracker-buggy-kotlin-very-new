@@ -1,5 +1,9 @@
-root = true
-
 [*.kt]
-ktlint_standard_function-naming = disabled
-ktlint_standard_no-wildcard-imports = disabled
+ktlint_standard_function-signature = disabled
+ktlint_standard_parameter-list-wrapping = disabled
+ktlint_standard_blank-line-before-declaration = disabled
+ktlint_standard_annotation = disabled
+ktlint_standard_multiline-expression-wrapping = disabled
+ktlint_standard_wrapping = disabled
+ktlint_standard_no-empty-first-line-in-class-body = disabled
+ktlint_standard_no-unused-imports = disabled
